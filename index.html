@@ -500,6 +500,45 @@
   </div>
 </div>
 
+<!-- SCREEN: SETTINGS -->
+<div class="screen" id="screen-settings">
+  <div class="page-header">
+    <div class="header-title">Settings ⚙️</div>
+    <div class="header-sub">Customize your trip</div>
+  </div>
+
+  <div style="padding: 12px 16px;">
+    <div class="card">
+      <div class="card-label">Exchange Rate</div>
+      <div style="margin-bottom: 12px;">
+        <label style="font-size:12px;color:var(--text2);margin-bottom:4px;display:block;">¥1 RMB = RM</label>
+        <input type="number" id="set-exchange-rate" placeholder="0.64" step="0.01" style="width:100%;height:44px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:var(--bg);font-family:'DM Sans',sans-serif;font-size:15px;padding:0 12px;" value="0.64">
+        <div style="font-size:11px;color:var(--text3);margin-top:4px;">Update this if the rate changes</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">Trip Budget</div>
+      <div style="margin-bottom: 12px;">
+        <label style="font-size:12px;color:var(--text2);margin-bottom:4px;display:block;">Budget in RMB (¥)</label>
+        <input type="number" id="set-budget-rmb" placeholder="5000" step="100" style="width:100%;height:44px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:var(--bg);font-family:'DM Sans',sans-serif;font-size:15px;padding:0 12px;" value="5000">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text2);margin-bottom:4px;display:block;">Budget in MYR (RM)</label>
+        <input type="number" id="set-budget-myr" placeholder="3200" step="100" style="width:100%;height:44px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:var(--bg);font-family:'DM Sans',sans-serif;font-size:15px;padding:0 12px;" value="3200">
+      </div>
+    </div>
+
+    <button class="btn-primary" onclick="saveSettings()" style="margin-top:12px;">💾 Save Settings</button>
+
+    <div class="card" style="margin-top:20px;background:var(--red-soft);border:1px solid var(--red);">
+      <div class="card-label" style="color:var(--red);">Danger Zone</div>
+      <button class="btn-primary" onclick="clearAllData()" style="background:var(--red);width:100%;margin-top:8px;">🗑️ Clear All Data</button>
+      <div style="font-size:11px;color:var(--text2);margin-top:8px;">This will delete all expenses. Cannot be undone.</div>
+    </div>
+  </div>
+</div>
+
 <!-- BOTTOM NAV -->
 <nav class="bottom-nav">
   <div class="nav-item active" onclick="showScreen('log')" id="nav-log">
@@ -517,6 +556,10 @@
   <div class="nav-item" onclick="showScreen('settle')" id="nav-settle">
     <span class="nav-icon">💸</span>
     <span>Settle</span>
+  </div>
+  <div class="nav-item" onclick="showScreen('settings')" id="nav-settings">
+    <span class="nav-icon">⚙️</span>
+    <span>Settings</span>
   </div>
 </nav>
 
@@ -545,27 +588,98 @@
   let selectedPeople = [...PEOPLE];
   let currency = 'RMB';
   let nextId = 1;
+  let exchangeRate = 0.64;
+  let budgetRMB = 5000;
+  let budgetMYR = 3200;
 
   // Load from localStorage
   try {
     const saved = localStorage.getItem('trip-expenses');
-    if (saved) { expenses = JSON.parse(saved); nextId = expenses.length ? Math.max(...expenses.map(e=>e.id)) + 1 : 1; }
+    if (saved) {
+      expenses = JSON.parse(saved);
+      // Migrate old expenses without currency field
+      expenses = expenses.map(e => ({
+        ...e,
+        currency: e.currency || 'RMB'  // Default old entries to RMB
+      }));
+      nextId = expenses.length ? Math.max(...expenses.map(e=>e.id)) + 1 : 1;
+    }
+    
+    const settings = localStorage.getItem('trip-settings');
+    if (settings) {
+      const s = JSON.parse(settings);
+      exchangeRate = s.exchangeRate || 0.64;
+      budgetRMB = s.budgetRMB || 5000;
+      budgetMYR = s.budgetMYR || 3200;
+      document.getElementById('set-exchange-rate').value = exchangeRate;
+      document.getElementById('set-budget-rmb').value = budgetRMB;
+      document.getElementById('set-budget-myr').value = budgetMYR;
+    }
   } catch(e) {}
+
+  function saveSettings() {
+    exchangeRate = parseFloat(document.getElementById('set-exchange-rate').value) || 0.64;
+    budgetRMB = parseFloat(document.getElementById('set-budget-rmb').value) || 5000;
+    budgetMYR = parseFloat(document.getElementById('set-budget-myr').value) || 3200;
+    
+    try {
+      localStorage.setItem('trip-settings', JSON.stringify({ exchangeRate, budgetRMB, budgetMYR }));
+    } catch(e) {}
+    
+    showToast('Settings saved! 💾');
+    renderDash();
+  }
+
+  function clearAllData() {
+    if (confirm('Are you sure? This will delete all expenses.')) {
+      expenses = [];
+      nextId = 1;
+      save();
+      renderExpenses();
+      renderDash();
+      renderSettle();
+      showToast('All data cleared 🗑️');
+    }
+  }
 
   function save() {
     try { localStorage.setItem('trip-expenses', JSON.stringify(expenses)); } catch(e) {}
   }
 
-  function fmt(val) {
-    const v = currency === 'MYR' ? val * RMB_TO_MYR : val;
+  function fmt(val, sourceCurrency = 'RMB') {
+    // Convert source currency to display currency
+    let displayVal = val;
+    
+    // If source is different from display, convert
+    if (sourceCurrency === 'MYR' && currency === 'RMB') {
+      displayVal = val / exchangeRate;  // RM to ¥
+    } else if (sourceCurrency === 'RMB' && currency === 'MYR') {
+      displayVal = val * exchangeRate;  // ¥ to RM
+    }
+    
     const sym = currency === 'MYR' ? 'RM' : '¥';
-    return sym + v.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return sym + displayVal.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   }
 
-  function fmtFull(val) {
-    const v = currency === 'MYR' ? val * RMB_TO_MYR : val;
+  function fmtFull(val, sourceCurrency = 'RMB') {
+    let displayVal = val;
+    
+    if (sourceCurrency === 'MYR' && currency === 'RMB') {
+      displayVal = val / exchangeRate;
+    } else if (sourceCurrency === 'RMB' && currency === 'MYR') {
+      displayVal = val * exchangeRate;
+    }
+    
     const sym = currency === 'MYR' ? 'RM' : '¥';
-    return sym + v.toFixed(1).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return sym + displayVal.toFixed(1).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
+  function toRMB(val, sourceCurrency = 'RMB') {
+    // Convert any amount to RMB for calculations
+    if (sourceCurrency === 'MYR') {
+      return val / exchangeRate;
+    }
+    return val;
   }
 
   // Build chips
@@ -604,6 +718,7 @@
     const desc = document.getElementById('inp-desc').value.trim();
     const amount = +document.getElementById('inp-amount').value;
     const paidBy = document.getElementById('inp-paidby').value;
+    const inputCurrency = currency; // Track which currency was used
 
     if (!desc) { showToast('Add a description ✏️'); return; }
     if (!amount || amount <= 0) { showToast('Enter a valid amount 💰'); return; }
@@ -613,7 +728,7 @@
 
     const share = amount / splitPeople.length;
 
-    expenses.push({ id: nextId++, day, cat, desc, amount, paidBy, splitPeople, share });
+    expenses.push({ id: nextId++, day, cat, desc, amount, paidBy, splitPeople, share, currency: inputCurrency });
     save();
 
     // Reset
@@ -622,13 +737,21 @@
     setSplit('equal');
     document.getElementById('inp-desc').focus();
 
-    showToast(`Added ${fmt(amount)} · ${fmtShare(share, splitPeople.length)} each`);
+    showToast(`Added ${fmt(amount, inputCurrency)} · ${fmtShare(share, splitPeople.length, inputCurrency)} each`);
     renderExpenses(); renderDash(); renderSettle();
   }
 
-  function fmtShare(share, n) {
+  function fmtShare(share, n, sourceCurrency = 'RMB') {
     const sym = currency === 'MYR' ? 'RM' : '¥';
-    return sym + share.toFixed(0);
+    let displayShare = share;
+    
+    if (sourceCurrency === 'MYR' && currency === 'RMB') {
+      displayShare = share / exchangeRate;
+    } else if (sourceCurrency === 'RMB' && currency === 'MYR') {
+      displayShare = share * exchangeRate;
+    }
+    
+    return sym + displayShare.toFixed(0);
   }
 
   function deleteExpense(id) {
@@ -657,8 +780,8 @@
 
   // RENDER EXPENSES
   function renderExpenses() {
-    const total = expenses.reduce((s,e) => s + e.amount, 0);
-    document.getElementById('exp-total-label').textContent = `${expenses.length} entries · ${fmt(total)}`;
+    const total = expenses.reduce((s,e) => s + toRMB(e.amount, e.currency), 0);
+    document.getElementById('exp-total-label').textContent = `${expenses.length} entries · ${fmt(total, 'RMB')}`;
 
     const container = document.getElementById('expense-list-container');
     if (!expenses.length) {
@@ -675,19 +798,20 @@
 
     let html = '';
     Object.keys(byDay).sort((a,b)=>a-b).forEach(day => {
-      const dayTotal = byDay[day].reduce((s,e) => s + e.amount, 0);
-      html += `<div class="day-label">Day ${day} <span style="color:var(--text3);font-weight:400;">· ${fmt(dayTotal)}</span></div>`;
+      const dayTotal = byDay[day].reduce((s,e) => s + toRMB(e.amount, e.currency), 0);
+      html += `<div class="day-label">Day ${day} <span style="color:var(--text3);font-weight:400;">· ${fmt(dayTotal, 'RMB')}</span></div>`;
       byDay[day].forEach(e => {
         const color = CAT_COLORS[e.cat] || '#6B7280';
         const splitLabel = e.splitPeople.length === 6 ? '÷6' : `÷${e.splitPeople.length} (${e.splitPeople.join(', ')})`;
+        const currencyBadge = e.currency === 'MYR' ? 'RM' : '¥';
         html += `<div class="expense-item">
           <div class="exp-icon" style="background:${color}18;">${e.cat.split(' ')[0]}</div>
           <div class="exp-body">
             <div class="exp-desc">${e.desc}</div>
-            <div class="exp-meta">${e.cat.replace(/^\S+\s/,'')} · ${splitLabel}</div>
+            <div class="exp-meta">${e.cat.replace(/^\S+\s/,'')} · ${splitLabel} · ${currencyBadge}</div>
           </div>
           <div class="exp-amount">
-            <div class="exp-amt-val">${fmt(e.amount)}</div>
+            <div class="exp-amt-val">${fmt(e.amount, e.currency)}</div>
             <div class="exp-payer">${e.paidBy}</div>
           </div>
           <button class="delete-btn" onclick="deleteExpense(${e.id})">×</button>
@@ -699,21 +823,25 @@
 
   // RENDER DASHBOARD
   function renderDash() {
-    const total = expenses.reduce((s,e) => s + e.amount, 0);
+    const total = expenses.reduce((s,e) => s + toRMB(e.amount, e.currency), 0);
     const days = expenses.length ? Math.max(...expenses.map(e=>e.day)) : 1;
-    const budget = currency === 'MYR' ? BUDGET_MYR : BUDGET_RMB;
-    const budgetPct = Math.min(100, Math.round(total / budget * 100));
+    const budget = currency === 'MYR' ? budgetMYR : budgetRMB;
+    const budgetInRmb = currency === 'MYR' ? budgetMYR / exchangeRate : budgetRMB;
+    const budgetPct = Math.min(100, Math.round(total / budgetInRmb * 100));
 
-    document.getElementById('dash-total').textContent = fmt(total);
+    document.getElementById('dash-total').textContent = fmt(total, 'RMB');
     document.getElementById('dash-entries').textContent = expenses.length + ' entries';
-    document.getElementById('budget-label').textContent = `${budgetPct}% of ${fmt(budget)} budget`;
+    document.getElementById('budget-label').textContent = `${budgetPct}% of ${fmt(budgetInRmb, 'RMB')} budget`;
     document.getElementById('budget-bar').style.width = budgetPct + '%';
-    document.getElementById('dash-per-day').textContent = fmt(days > 0 ? total / days : 0);
-    document.getElementById('dash-per-person').textContent = fmt(total / 6);
+    document.getElementById('dash-per-day').textContent = fmt(days > 0 ? total / days : 0, 'RMB');
+    document.getElementById('dash-per-person').textContent = fmt(total / 6, 'RMB');
 
     // Category
     const catTotals = {};
-    expenses.forEach(e => { catTotals[e.cat] = (catTotals[e.cat]||0) + e.amount; });
+    expenses.forEach(e => {
+      const amtInRmb = toRMB(e.amount, e.currency);
+      catTotals[e.cat] = (catTotals[e.cat]||0) + amtInRmb;
+    });
     const maxCat = Math.max(...Object.values(catTotals), 1);
     const catHTML = Object.entries(catTotals).sort((a,b) => b[1]-a[1]).map(([cat, val]) => {
       const color = CAT_COLORS[cat] || '#6B7280';
@@ -722,7 +850,7 @@
         <div class="cat-emoji">${cat.split(' ')[0]}</div>
         <div class="cat-label-text">${cat.replace(/^\S+\s/,'')}</div>
         <div class="cat-bar-wrap"><div class="cat-bar" style="width:${pct}%;background:${color};"></div></div>
-        <div class="cat-val">${fmt(val)}</div>
+        <div class="cat-val">${fmt(val, 'RMB')}</div>
       </div>`;
     }).join('') || '<div style="color:var(--text3);font-size:13px;">No data yet</div>';
     document.getElementById('cat-breakdown').innerHTML = catHTML;
@@ -730,7 +858,10 @@
     // Daily
     const dayTotals = {};
     for (let d = 1; d <= 7; d++) dayTotals[d] = 0;
-    expenses.forEach(e => { dayTotals[e.day] = (dayTotals[e.day]||0) + e.amount; });
+    expenses.forEach(e => {
+      const amtInRmb = toRMB(e.amount, e.currency);
+      dayTotals[e.day] = (dayTotals[e.day]||0) + amtInRmb;
+    });
     const maxDay = Math.max(...Object.values(dayTotals), 1);
     document.getElementById('daily-chart').innerHTML = Object.entries(dayTotals).map(([d, val]) => {
       const pct = val / maxDay * 100;
@@ -743,7 +874,10 @@
     // Person contrib
     const personPaid = {};
     PEOPLE.forEach(p => personPaid[p] = 0);
-    expenses.forEach(e => { personPaid[e.paidBy] = (personPaid[e.paidBy]||0) + e.amount; });
+    expenses.forEach(e => {
+      const amtInRmb = toRMB(e.amount, e.currency);
+      personPaid[e.paidBy] = (personPaid[e.paidBy]||0) + amtInRmb;
+    });
     const maxPaid = Math.max(...Object.values(personPaid), 1);
     document.getElementById('person-contrib').innerHTML = PEOPLE.map(p => {
       const val = personPaid[p];
@@ -752,21 +886,22 @@
         <div class="cat-emoji">👤</div>
         <div class="cat-label-text">${p}</div>
         <div class="cat-bar-wrap"><div class="cat-bar" style="width:${pct}%;background:var(--accent);opacity:${val>0?1:0.15};"></div></div>
-        <div class="cat-val">${fmt(val)}</div>
+        <div class="cat-val">${fmt(val, 'RMB')}</div>
       </div>`;
     }).join('');
   }
 
   // RENDER SETTLE
   function renderSettle() {
-    // Calculate balances
+    // Calculate balances - convert all to RMB
     const balances = {};
     PEOPLE.forEach(p => balances[p] = 0);
 
     expenses.forEach(e => {
-      const share = e.amount / e.splitPeople.length;
+      const amtInRmb = toRMB(e.amount, e.currency);
+      const share = amtInRmb / e.splitPeople.length;
       // paidBy gets credited full amount
-      balances[e.paidBy] += e.amount;
+      balances[e.paidBy] += amtInRmb;
       // each split person owes their share
       e.splitPeople.forEach(p => { balances[p] -= share; });
     });
@@ -779,7 +914,7 @@
       return `<div class="balance-row">
         <div class="bal-name">${p}</div>
         <div>
-          <span class="bal-val ${cls}">${fmtFull(Math.abs(val))}</span>
+          <span class="bal-val ${cls}">${fmtFull(Math.abs(val), 'RMB')}</span>
           <span style="font-size:11px;color:var(--text3);margin-left:4px;">${label}</span>
         </div>
       </div>`;
@@ -822,7 +957,7 @@
             <div class="settle-to">${t.to}</div>
             <div style="font-size:11px;color:var(--text3);">receives</div>
           </div>
-          <div class="settle-amount">${fmtFull(t.amt)}</div>
+          <div class="settle-amount">${fmtFull(t.amt, 'RMB')}</div>
         </div>`
       ).join('');
     }
